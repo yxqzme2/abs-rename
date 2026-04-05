@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+{% block title %}Scan — ABS Rename{% endblock %}
+
+{% block content %}
+<h1>Scan Audiobooks</h1>
+
+<div class="card">
+  <h2>Source Folders</h2>
+  <p class="muted" style="margin-bottom:0.75rem;font-size:0.82rem;">
+    Enter absolute paths to folders containing .m4b files. The scanner will search recursively.
+  </p>
+  <div id="source-folders">
+    <div class="folder-row">
+      <input type="text" class="source-input" placeholder="e.g. C:\Audiobooks\Inbox" />
+      <button class="btn btn-ghost btn-sm" onclick="removeFolder(this)">✕</button>
+    </div>
+  </div>
+  <div class="flex gap-2 items-center mt-1" style="flex-wrap:wrap;">
+    <button class="btn btn-ghost btn-sm add-folder-btn" onclick="addFolder()">+ Add folder</button>
+    <label class="checkbox-row" style="margin:0;font-size:0.78rem;">
+      <input type="checkbox" id="remember-folders" />
+      <span>Remember these folders next time</span>
+    </label>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Output Folder</h2>
+  <p class="muted" style="margin-bottom:0.75rem;font-size:0.82rem;">
+    Where organized copies will be written. Originals are never touched.
+  </p>
+  <div class="form-group">
+    <input type="text" id="output-folder" placeholder="e.g. C:\Audiobooks\Organized" />
+  </div>
+  <label class="checkbox-row" style="margin-top:0.4rem;font-size:0.78rem;">
+    <input type="checkbox" id="remember-output" />
+    <span>Remember this folder next time</span>
+  </label>
+</div>
+
+<div class="card">
+  <h2>Options</h2>
+  <div class="form-group">
+    <label>Naming Template</label>
+    <select id="template-select">
+      <option value="">Loading templates…</option>
+    </select>
+  </div>
+  <div class="checkbox-row">
+    <input type="checkbox" id="dry-run" checked />
+    <label for="dry-run">Dry run (simulate without copying files)</label>
+  </div>
+  <div class="alert alert-info" id="dry-run-note">
+    Dry run is enabled. No files will be copied — this lets you review the plan first.
+  </div>
+</div>
+
+<div id="scan-error" class="alert alert-error hidden"></div>
+
+<div class="flex gap-2 items-center">
+  <button class="btn btn-primary" id="scan-btn" onclick="startScan()">
+    ▶ Start Scan
+  </button>
+  <span id="scan-status" class="muted" style="font-size:0.82rem;"></span>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(async function loadTemplates() {
+  try {
+    const res = await fetch('/api/templates');
+    const data = await res.json();
+    const sel = document.getElementById('template-select');
+    sel.innerHTML = '';
+
+    // Predefined first
+    const all = [...(data.saved || [])];
+    if (!all.length) {
+      // Fall back to predefined list
+      (data.predefined || []).forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t.template;
+        opt.textContent = t.name;
+        if (t.default) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    } else {
+      all.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t.template_string;
+        opt.textContent = t.name + (t.is_default ? ' (default)' : '');
+        if (t.is_default) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    }
+  } catch(e) {
+    console.error('Failed to load templates', e);
+  }
+})();
+
+document.getElementById('dry-run').addEventListener('change', function() {
+  const note = document.getElementById('dry-run-note');
+  note.classList.toggle('hidden', !this.checked);
+});
+
+// --- Folder memory (localStorage) ---
+
+function saveFolders() {
+  const sources = Array.from(document.querySelectorAll('.source-input'))
+    .map(i => i.value.trim()).filter(Boolean);
+  localStorage.setItem('abs_source_folders', JSON.stringify(sources));
+}
+
+function saveOutput() {
+  const output = document.getElementById('output-folder').value.trim();
+  localStorage.setItem('abs_output_folder', output);
+}
+
+function loadSavedFolders() {
+  const rememberSrc = localStorage.getItem('abs_remember_folders') === 'true';
+  const rememberOut = localStorage.getItem('abs_remember_output') === 'true';
+  document.getElementById('remember-folders').checked = rememberSrc;
+  document.getElementById('remember-output').checked = rememberOut;
+
+  try {
+    if (rememberSrc) {
+      const sources = JSON.parse(localStorage.getItem('abs_source_folders') || '[]');
+      if (sources.length) {
+        const wrap = document.getElementById('source-folders');
+        wrap.innerHTML = '';
+        sources.forEach(path => {
+          const row = document.createElement('div');
+          row.className = 'folder-row';
+          row.innerHTML = `
+            <input type="text" class="source-input" value="${escHtmlAttr(path)}"
+              placeholder="e.g. C:\\Audiobooks\\Inbox" />
+            <button class="btn btn-ghost btn-sm" onclick="removeFolder(this)">✕</button>
+          `;
+          wrap.appendChild(row);
+        });
+      }
+    }
+
+    if (rememberOut) {
+      const output = localStorage.getItem('abs_output_folder') || '';
+      if (output) document.getElementById('output-folder').value = output;
+    }
+  } catch(e) { /* ignore corrupt storage */ }
+}
+
+document.getElementById('remember-folders').addEventListener('change', function() {
+  localStorage.setItem('abs_remember_folders', this.checked);
+  if (!this.checked) localStorage.removeItem('abs_source_folders');
+});
+
+document.getElementById('remember-output').addEventListener('change', function() {
+  localStorage.setItem('abs_remember_output', this.checked);
+  if (!this.checked) localStorage.removeItem('abs_output_folder');
+});
+
+// Pre-fill on load
+loadSavedFolders();
+
+function escHtmlAttr(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function addFolder() {
+  const wrap = document.getElementById('source-folders');
+  const row = document.createElement('div');
+  row.className = 'folder-row';
+  row.innerHTML = `
+    <input type="text" class="source-input" placeholder="e.g. C:\\Audiobooks\\Inbox" />
+    <button class="btn btn-ghost btn-sm" onclick="removeFolder(this)">✕</button>
+  `;
+  wrap.appendChild(row);
+}
+
+function removeFolder(btn) {
+  const rows = document.querySelectorAll('.folder-row');
+  if (rows.length === 1) return; // keep at least one
+  btn.closest('.folder-row').remove();
+}
+
+async function startScan() {
+  const btn = document.getElementById('scan-btn');
+  const statusEl = document.getElementById('scan-status');
+  const errEl = document.getElementById('scan-error');
+  errEl.classList.add('hidden');
+
+  const sourceFolders = Array.from(document.querySelectorAll('.source-input'))
+    .map(i => i.value.trim())
+    .filter(Boolean);
+
+  const outputFolder = document.getElementById('output-folder').value.trim();
+  const isDryRun     = document.getElementById('dry-run').checked;
+  const templateStr  = document.getElementById('template-select').value;
+
+  if (!sourceFolders.length) {
+    showError('Please enter at least one source folder.'); return;
+  }
+  if (!outputFolder) {
+    showError('Please enter an output folder.'); return;
+  }
+
+  if (document.getElementById('remember-folders').checked) saveFolders();
+  if (document.getElementById('remember-output').checked) saveOutput();
+
+  btn.disabled = true;
+  statusEl.textContent = 'Scanning… this may take a while for large libraries.';
+
+  try {
+    // Find template ID from the saved templates list (if available)
+    // We pass template via the scan request as template_id=null, relying on
+    // the default — or we can pass a custom template by saving it first.
+    // For now: just pass null and let the server use the default.
+    const body = {
+      source_folders: sourceFolders,
+      output_folder:  outputFolder,
+      is_dry_run:     isDryRun,
+      template_id:    null,
+    };
+
+    const res = await fetch('/api/scan', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Scan failed');
+    }
+
+    const data = await res.json();
+    statusEl.textContent =
+      `Done. Scanned: ${data.total_scanned}, ` +
+      `Matched: ${data.total_matched}, ` +
+      `Review: ${data.total_review_required}, ` +
+      `Unmatched: ${data.total_unmatched}`;
+
+    // Redirect to results page
+    setTimeout(() => {
+      window.location.href = `/results/${data.batch_run_id}`;
+    }, 800);
+
+  } catch(e) {
+    showError(e.message);
+    btn.disabled = false;
+    statusEl.textContent = '';
+  }
+
+  function showError(msg) {
+    errEl.textContent = msg;
+    errEl.classList.remove('hidden');
+  }
+}
+</script>
+{% endblock %}

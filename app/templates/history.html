@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}History — ABS Rename{% endblock %}
+
+{% block content %}
+<h1>Batch History</h1>
+<div id="loading" class="alert alert-info">Loading history…</div>
+<div id="empty"   class="alert alert-warning hidden">No batch runs yet.</div>
+<div class="table-wrap hidden" id="history-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Date</th>
+        <th>Source(s)</th>
+        <th>Template</th>
+        <th>Dry run?</th>
+        <th>Scanned</th>
+        <th>Matched</th>
+        <th>Copied</th>
+        <th>Conflicts</th>
+        <th>Errors</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="history-body"></tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadHistory() {
+  const res  = await fetch('/api/history');
+  const data = await res.json();
+  const runs = data.runs || [];
+  document.getElementById('loading').classList.add('hidden');
+
+  if (!runs.length) {
+    document.getElementById('empty').classList.remove('hidden');
+    return;
+  }
+
+  document.getElementById('history-wrap').classList.remove('hidden');
+  const tbody = document.getElementById('history-body');
+
+  runs.forEach(run => {
+    let folders = [];
+    try { folders = JSON.parse(run.source_folders || '[]'); } catch(e) {}
+    const date = run.started_at ? run.started_at.slice(0,19).replace('T',' ') : '—';
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${run.id}</td>
+      <td style="white-space:nowrap;">${date}</td>
+      <td class="path-cell" title="${escHtml(folders.join('\n'))}">${escHtml(folders[0] || '—')}${folders.length > 1 ? ` +${folders.length-1}` : ''}</td>
+      <td class="mono" style="font-size:0.72rem;">${escHtml(run.template_used || '—')}</td>
+      <td>${run.is_dry_run ? '<span class="badge badge-blue">yes</span>' : '<span class="badge badge-gray">no</span>'}</td>
+      <td>${run.total_scanned || 0}</td>
+      <td style="color:#4ade80;">${run.total_matched || 0}</td>
+      <td style="color:#4ade80;">${run.total_copied || 0}</td>
+      <td style="color:#fbbf24;">${run.total_skipped_conflicts || 0}</td>
+      <td style="color:#f87171;">${run.total_errors || 0}</td>
+      <td><a href="/history/${run.id}" class="btn btn-ghost btn-sm">Detail</a></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+loadHistory();
+</script>
+{% endblock %}

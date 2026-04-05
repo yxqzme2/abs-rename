@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Run #{{ batch_run_id }} — ABS Rename{% endblock %}
+
+{% block content %}
+<div class="flex justify-between items-center" style="margin-bottom:1rem;">
+  <h1>Batch Run #{{ batch_run_id }}</h1>
+  <a href="/history" class="btn btn-ghost btn-sm">← History</a>
+</div>
+
+<div id="loading" class="alert alert-info">Loading…</div>
+<div id="content" class="hidden">
+  <div class="card" id="run-meta"></div>
+  <h2 style="margin-top:1rem;margin-bottom:0.5rem;">Operations</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Source</th>
+          <th>Destination</th>
+          <th>Status</th>
+          <th>Error</th>
+        </tr>
+      </thead>
+      <tbody id="ops-body"></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const BATCH_RUN_ID = {{ batch_run_id }};
+
+async function load() {
+  const res  = await fetch(`/api/history/${BATCH_RUN_ID}`);
+  if (!res.ok) {
+    document.getElementById('loading').textContent = 'Not found.';
+    return;
+  }
+  const run = await res.json();
+  document.getElementById('loading').classList.add('hidden');
+  document.getElementById('content').classList.remove('hidden');
+
+  let folders = [];
+  try { folders = JSON.parse(run.source_folders || '[]'); } catch(e) {}
+
+  document.getElementById('run-meta').innerHTML = `
+    <div class="flex gap-2" style="flex-wrap:wrap;font-size:0.82rem;gap:1.5rem;">
+      <div><div class="muted">Started</div><div>${(run.started_at||'').slice(0,19).replace('T',' ')}</div></div>
+      <div><div class="muted">Completed</div><div>${(run.completed_at||'—').slice(0,19).replace('T',' ')}</div></div>
+      <div><div class="muted">Output</div><div class="mono">${escHtml(run.output_folder||'—')}</div></div>
+      <div><div class="muted">Template</div><div class="mono">${escHtml(run.template_used||'—')}</div></div>
+      <div><div class="muted">Dry run</div><div>${run.is_dry_run?'Yes':'No'}</div></div>
+    </div>
+    <div class="flex gap-2" style="flex-wrap:wrap;font-size:0.82rem;margin-top:0.75rem;gap:1.5rem;">
+      <div><div class="muted">Scanned</div><strong>${run.total_scanned||0}</strong></div>
+      <div><div class="muted">Matched</div><strong style="color:#4ade80;">${run.total_matched||0}</strong></div>
+      <div><div class="muted">Review</div><strong style="color:#fbbf24;">${run.total_review_required||0}</strong></div>
+      <div><div class="muted">Unmatched</div><strong style="color:#f87171;">${run.total_unmatched||0}</strong></div>
+      <div><div class="muted">Copied</div><strong style="color:#4ade80;">${run.total_copied||0}</strong></div>
+      <div><div class="muted">Conflicts</div><strong style="color:#fbbf24;">${run.total_skipped_conflicts||0}</strong></div>
+      <div><div class="muted">Errors</div><strong style="color:#f87171;">${run.total_errors||0}</strong></div>
+    </div>
+    <div style="margin-top:0.75rem;font-size:0.78rem;">
+      <div class="muted">Sources</div>
+      ${folders.map(f=>`<div class="mono">${escHtml(f)}</div>`).join('')}
+    </div>
+  `;
+
+  const ops = run.operations || [];
+  const tbody = document.getElementById('ops-body');
+  if (!ops.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="muted">No operations recorded.</td></tr>';
+    return;
+  }
+
+  const statusClass = {
+    success:'log-ok', dry_run:'log-dry',
+    skipped_conflict:'log-skip', error:'log-err', pending:'',
+  };
+
+  ops.forEach(op => {
+    const tr = document.createElement('tr');
+    const cls = statusClass[op.status] || '';
+    tr.innerHTML = `
+      <td style="white-space:nowrap;font-size:0.76rem;">${(op.timestamp||'').slice(0,19).replace('T',' ')}</td>
+      <td class="path-cell" title="${escHtml(op.source_path)}">${escHtml((op.source_path||'').split(/[/\\]/).pop())}</td>
+      <td class="path-cell" title="${escHtml(op.destination_path)}">${escHtml(op.destination_path||'—')}</td>
+      <td><span class="${cls}">${op.status||'—'}</span></td>
+      <td style="color:#f87171;font-size:0.76rem;">${escHtml(op.error_message||'')}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+load();
+</script>
+{% endblock %}

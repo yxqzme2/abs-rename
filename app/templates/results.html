@@ -1,0 +1,450 @@
+{% extends "base.html" %}
+{% block title %}Results — ABS Rename{% endblock %}
+
+{% block content %}
+<div class="flex justify-between items-center" style="margin-bottom:1rem;">
+  <h1>Review Results <span class="muted" style="font-size:0.9rem;">Batch #{{ batch_run_id }}</span></h1>
+  <div class="flex gap-1">
+    <button class="btn btn-ghost btn-sm" onclick="selectAllHigh()">Select all matched</button>
+    <button class="btn btn-ghost btn-sm" onclick="deselectAll()">Deselect all</button>
+    <a href="/execute/{{ batch_run_id }}" class="btn btn-primary">
+      Proceed to Execute →
+    </a>
+  </div>
+</div>
+
+<div id="loading" class="alert alert-info">Loading results…</div>
+<div id="error"   class="alert alert-error hidden"></div>
+
+<div id="summary-bar" class="card hidden" style="padding:0.75rem 1rem;">
+  <div class="flex gap-2" style="flex-wrap:wrap;font-size:0.82rem;">
+    <span>Scanned: <strong id="s-scanned">–</strong></span>
+    <span>•</span>
+    <span>Matched: <strong id="s-matched" style="color:#4ade80;">–</strong></span>
+    <span>•</span>
+    <span>Review: <strong id="s-review" style="color:#fbbf24;">–</strong></span>
+    <span>•</span>
+    <span>Unmatched: <strong id="s-unmatched" style="color:#f87171;">–</strong></span>
+    <span>•</span>
+    <span>Approved: <strong id="s-approved" style="color:#7eb8f7;">–</strong></span>
+  </div>
+</div>
+
+<div class="table-wrap hidden" id="results-wrap">
+  <table id="results-table">
+    <thead>
+      <tr>
+        <th style="width:32px;">✓</th>
+        <th style="width:48px;"></th><!-- cover -->
+        <th>Source file</th>
+        <th>Local metadata</th>
+        <th>Best match</th>
+        <th style="width:80px;">Confidence</th>
+        <th>Destination path</th>
+        <th style="width:100px;">Status</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="results-body"></tbody>
+  </table>
+</div>
+
+<!-- ------------------------------------------------------------------ -->
+<!-- Search modal                                                          -->
+<!-- ------------------------------------------------------------------ -->
+<div id="search-modal-backdrop" class="hidden" style="
+  position:fixed;inset:0;background:rgba(0,0,0,0.7);
+  z-index:1000;display:flex;align-items:center;justify-content:center;">
+  <div style="
+    background:#1a1d27;border:1px solid #2a2d3a;border-radius:8px;
+    width:min(720px,95vw);max-height:85vh;display:flex;flex-direction:column;
+    overflow:hidden;">
+
+    <!-- Modal header -->
+    <div style="padding:1rem 1.25rem;border-bottom:1px solid #2a2d3a;
+      display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <div style="font-weight:600;font-size:1rem;color:#fff;" id="modal-book-title">Search</div>
+        <div style="font-size:0.78rem;color:#888;" id="modal-book-file"></div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="closeSearchModal()">✕ Close</button>
+    </div>
+
+    <!-- Search inputs -->
+    <div style="padding:1rem 1.25rem;border-bottom:1px solid #2a2d3a;
+      display:flex;gap:0.75rem;flex-wrap:wrap;">
+      <input type="text" id="modal-query" placeholder="Title or ASIN"
+        style="flex:2;min-width:200px;"
+        onkeydown="if(event.key==='Enter') runModalSearch()" />
+      <input type="text" id="modal-author" placeholder="Author (optional)"
+        style="flex:1;min-width:150px;"
+        onkeydown="if(event.key==='Enter') runModalSearch()" />
+      <button class="btn btn-primary" onclick="runModalSearch()">Search</button>
+    </div>
+
+    <!-- Results list -->
+    <div id="modal-results" style="overflow-y:auto;flex:1;padding:0.5rem 0;">
+      <div id="modal-status" style="padding:0.75rem 1.25rem;color:#888;font-size:0.82rem;">
+        Enter a title or ASIN above and press Search.
+      </div>
+    </div>
+
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const BATCH_RUN_ID = {{ batch_run_id }};
+let allItems = [];
+let modalAudioId = null;
+
+// ------------------------------------------------------------------ //
+// Data loading
+// ------------------------------------------------------------------ //
+
+async function loadResults() {
+  try {
+    const res = await fetch(`/api/results/${BATCH_RUN_ID}`);
+    if (!res.ok) throw new Error('Failed to load results');
+    const data = await res.json();
+    allItems = data.items || [];
+    renderResults(allItems);
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('results-wrap').classList.remove('hidden');
+    document.getElementById('summary-bar').classList.remove('hidden');
+    updateSummary();
+  } catch(e) {
+    document.getElementById('loading').classList.add('hidden');
+    const errEl = document.getElementById('error');
+    errEl.textContent = e.message;
+    errEl.classList.remove('hidden');
+  }
+}
+
+// ------------------------------------------------------------------ //
+// Rendering
+// ------------------------------------------------------------------ //
+
+function confClass(score) {
+  if (score === null || score === undefined) return 'conf-none';
+  if (score >= 90) return 'conf-high';
+  if (score >= 75) return 'conf-medium';
+  return 'conf-low';
+}
+
+function statusBadge(status) {
+  const map = {
+    matched:          '<span class="badge badge-green">matched</span>',
+    auto:             '<span class="badge badge-green">auto</span>',
+    review_required:  '<span class="badge badge-yellow">review</span>',
+    unmatched:        '<span class="badge badge-red">unmatched</span>',
+    user_selected:    '<span class="badge badge-blue">selected</span>',
+    scanned:          '<span class="badge badge-gray">scanned</span>',
+    error:            '<span class="badge badge-red">error</span>',
+  };
+  return map[status] || `<span class="badge badge-gray">${status}</span>`;
+}
+
+function renderResults(items) {
+  const tbody = document.getElementById('results-body');
+  tbody.innerHTML = '';
+
+  items.forEach((item) => {
+    const conf        = item.confidence_score;
+    // Only check the box if the DB says it's approved — no client-side guessing.
+    // The scan route auto-approves all matched items so this stays in sync.
+    const approved    = item.user_approved ? 'checked' : '';
+    const hasMatch    = item.selected_candidate_asin != null;
+    const hasPlan     = item.full_destination_path != null;
+
+    // Find the selected candidate object
+    const selCand = (item.candidates || []).find(c => c.asin === item.selected_candidate_asin) || {};
+
+    // Cover image — show for any item that has one
+    const coverUrl = selCand.image_url || '';
+    const coverCell = coverUrl
+      ? `<img src="${escHtml(coverUrl)}" alt="cover"
+           style="width:40px;height:40px;object-fit:cover;border-radius:3px;display:block;"
+           onerror="this.style.display='none'" />`
+      : '';
+
+    // Candidate dropdown options
+    const candOptions = (item.candidates || []).map(c =>
+      `<option value="${c.asin}" ${c.asin === item.selected_candidate_asin ? 'selected' : ''}>
+         ${escHtml(c.title)} — ${(c.authors || []).join(', ')}
+       </option>`
+    ).join('');
+
+    const row = document.createElement('tr');
+    row.id = `row-${item.audiobook_id}`;
+    row.innerHTML = `
+      <td>
+        <input type="checkbox" class="approve-cb"
+          data-audio-id="${item.audiobook_id}"
+          data-plan-id="${item.plan_id || ''}"
+          ${approved}
+          ${!hasPlan ? 'disabled' : ''}
+          onchange="onApproveChange(this)"
+        />
+      </td>
+      <td style="width:48px;padding:4px;">${coverCell}</td>
+      <td class="path-cell" title="${escHtml(item.source_path)}">${escHtml(item.filename)}</td>
+      <td>
+        <div>${escHtml(item.title_from_tags || '—')}</div>
+        <div class="muted" style="font-size:0.76rem;">${escHtml(item.author_from_tags || '')}</div>
+        ${item.series_from_tags
+          ? `<div class="muted" style="font-size:0.72rem;">${escHtml(item.series_from_tags)} ${item.series_index_from_tags || ''}</div>`
+          : ''}
+      </td>
+      <td>
+        ${hasMatch ? `
+          <div>${escHtml(selCand.title || '—')}</div>
+          <div class="muted" style="font-size:0.76rem;">${(selCand.authors||[]).join(', ')}</div>
+          ${selCand.series_name
+            ? `<div class="muted" style="font-size:0.72rem;">${escHtml(selCand.series_name)} ${selCand.series_position||''}</div>`
+            : ''}
+        ` : '<span class="muted">No match</span>'}
+      </td>
+      <td>
+        <span class="confidence ${confClass(conf)}">${conf != null ? conf.toFixed(0)+'%' : '—'}</span>
+      </td>
+      <td class="path-cell editable">
+        ${hasPlan
+          ? `<input class="inline-edit" id="dest-input-${item.audiobook_id}"
+               value="${escHtml(item.full_destination_path)}"
+               onchange="onPathEdit(${item.audiobook_id}, ${item.plan_id}, this.value)"
+             />`
+          : '<span class="muted">—</span>'
+        }
+      </td>
+      <td>${statusBadge(item.match_status || item.scan_status)}</td>
+      <td>
+        <div class="flex gap-1" style="flex-wrap:wrap;">
+          ${item.candidates && item.candidates.length > 1 ? `
+            <select class="candidate-select"
+              onchange="onCandidateSelect(${item.audiobook_id}, this.value)">
+              ${candOptions}
+            </select>
+          ` : ''}
+          <button class="btn btn-ghost btn-sm"
+            onclick="openSearchModal(${item.audiobook_id},
+              '${escHtmlAttr(item.title_from_tags || item.filename || '')}',
+              '${escHtmlAttr(item.author_from_tags || '')}',
+              '${escHtmlAttr(item.filename || '')}')">Search</button>
+        </div>
+      </td>
+    `;
+    tbody.appendChild(row);
+  });
+
+  updateSummary();
+}
+
+// ------------------------------------------------------------------ //
+// Search modal
+// ------------------------------------------------------------------ //
+
+function openSearchModal(audioId, title, author, filename) {
+  modalAudioId = audioId;
+  document.getElementById('modal-book-title').textContent = title || filename;
+  document.getElementById('modal-book-file').textContent  = filename;
+  document.getElementById('modal-query').value  = title;
+  document.getElementById('modal-author').value = author;
+  document.getElementById('modal-results').innerHTML =
+    '<div id="modal-status" style="padding:0.75rem 1.25rem;color:#888;font-size:0.82rem;">Press Search to find candidates.</div>';
+  document.getElementById('search-modal-backdrop').classList.remove('hidden');
+  setTimeout(() => document.getElementById('modal-query').focus(), 50);
+}
+
+function closeSearchModal() {
+  document.getElementById('search-modal-backdrop').classList.add('hidden');
+  modalAudioId = null;
+}
+
+// Close on backdrop click
+document.getElementById('search-modal-backdrop').addEventListener('click', function(e) {
+  if (e.target === this) closeSearchModal();
+});
+
+async function runModalSearch() {
+  const query  = document.getElementById('modal-query').value.trim();
+  const author = document.getElementById('modal-author').value.trim();
+  if (!query || modalAudioId === null) return;
+
+  const statusEl = document.getElementById('modal-status');
+  document.getElementById('modal-results').innerHTML =
+    '<div id="modal-status" style="padding:0.75rem 1.25rem;color:#888;font-size:0.82rem;">Searching…</div>';
+
+  try {
+    const res = await fetch(`/api/results/${BATCH_RUN_ID}/search`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({audiobook_id: modalAudioId, query, author: author || null}),
+    });
+    const data = await res.json();
+    renderModalResults(data.candidates || [], data.best_asin);
+  } catch(e) {
+    document.getElementById('modal-results').innerHTML =
+      `<div style="padding:0.75rem 1.25rem;color:#f87171;font-size:0.82rem;">Search failed: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function renderModalResults(candidates, bestAsin) {
+  const wrap = document.getElementById('modal-results');
+  if (!candidates.length) {
+    wrap.innerHTML = '<div style="padding:0.75rem 1.25rem;color:#888;font-size:0.82rem;">No results found. Try a different query.</div>';
+    return;
+  }
+
+  wrap.innerHTML = candidates.map(c => {
+    const isBest   = c.asin === bestAsin;
+    const duration = c.runtime_seconds ? formatDuration(c.runtime_seconds) : null;
+    const authors  = (c.authors  || []).join(', ');
+    const narr     = (c.narrators|| []).join(', ');
+    const border   = isBest ? 'border-color:#5b8ef7;' : '';
+
+    return `
+      <div style="display:flex;gap:1rem;padding:0.75rem 1.25rem;
+        border-bottom:1px solid #1e2130;cursor:pointer;${border}
+        transition:background 0.1s;"
+        onmouseenter="this.style.background='#1e2130'"
+        onmouseleave="this.style.background=''"
+        onclick="selectFromModal('${escHtmlAttr(c.asin)}')">
+        ${c.image_url
+          ? `<img src="${escHtml(c.image_url)}" alt="cover"
+               style="width:56px;height:56px;object-fit:cover;border-radius:4px;flex-shrink:0;"
+               onerror="this.style.display='none'" />`
+          : `<div style="width:56px;height:56px;background:#2a2d3a;border-radius:4px;flex-shrink:0;"></div>`}
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:600;font-size:0.9rem;color:#fff;display:flex;align-items:center;gap:0.5rem;">
+            ${escHtml(c.title)}
+            ${isBest ? '<span class="badge badge-blue" style="font-size:0.65rem;">best match</span>' : ''}
+          </div>
+          <div style="font-size:0.78rem;color:#aaa;margin-top:0.15rem;">by ${escHtml(authors)}</div>
+          ${narr ? `<div style="font-size:0.76rem;color:#888;">Narrators: ${escHtml(narr)}</div>` : ''}
+          <div style="display:flex;gap:1rem;margin-top:0.3rem;flex-wrap:wrap;">
+            ${c.series_name
+              ? `<span style="font-size:0.72rem;background:#1a2f5a;color:#7eb8f7;
+                   padding:0.1rem 0.45rem;border-radius:999px;">
+                   ${escHtml(c.series_name)}${c.series_position ? ' #'+c.series_position : ''}
+                 </span>`
+              : ''}
+            ${duration
+              ? `<span style="font-size:0.72rem;color:#888;">Duration: ${duration}</span>`
+              : ''}
+          </div>
+        </div>
+        <div style="flex-shrink:0;align-self:center;">
+          <button class="btn btn-primary btn-sm">Select</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function selectFromModal(asin) {
+  if (!modalAudioId) return;
+  const audioId = modalAudioId;
+
+  const res = await fetch(`/api/results/${BATCH_RUN_ID}/select`, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({audiobook_id: audioId, asin}),
+  });
+  const data = await res.json();
+  closeSearchModal();
+  await loadResults();
+}
+
+// ------------------------------------------------------------------ //
+// Approval / editing
+// ------------------------------------------------------------------ //
+
+function updateSummary() {
+  const total    = allItems.length;
+  const matched  = allItems.filter(i => i.match_status === 'auto' || i.match_status === 'matched').length;
+  const review   = allItems.filter(i => i.match_status === 'review_required').length;
+  const unmatched= allItems.filter(i => i.match_status === 'unmatched').length;
+  const approved = document.querySelectorAll('.approve-cb:checked').length;
+
+  document.getElementById('s-scanned').textContent   = total;
+  document.getElementById('s-matched').textContent   = matched;
+  document.getElementById('s-review').textContent    = review;
+  document.getElementById('s-unmatched').textContent = unmatched;
+  document.getElementById('s-approved').textContent  = approved;
+}
+
+async function onApproveChange(cb) {
+  const planId   = cb.dataset.planId;
+  const approved = cb.checked;
+  if (!planId) return;
+  await fetch(`/api/results/${BATCH_RUN_ID}/approve`, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({plan_id: parseInt(planId), approved}),
+  });
+  updateSummary();
+}
+
+async function onPathEdit(audioId, planId, newPath) {
+  if (!planId) return;
+  await fetch(`/api/results/${BATCH_RUN_ID}/approve`, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({plan_id: parseInt(planId), approved: true, custom_path: newPath}),
+  });
+}
+
+async function onCandidateSelect(audioId, asin) {
+  const res = await fetch(`/api/results/${BATCH_RUN_ID}/select`, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({audiobook_id: audioId, asin}),
+  });
+  const data = await res.json();
+  const inp = document.getElementById(`dest-input-${audioId}`);
+  if (inp) inp.value = data.full_destination_path || '';
+  await loadResults();
+}
+
+function selectAllHigh() {
+  const toCheck = [];
+  document.querySelectorAll('.approve-cb').forEach(cb => {
+    if (!cb.disabled && !cb.checked) {
+      cb.checked = true;
+      toCheck.push(cb);
+    }
+  });
+  toCheck.forEach(cb => onApproveChange(cb));
+  updateSummary();
+}
+
+function deselectAll() {
+  document.querySelectorAll('.approve-cb:not(:disabled)').forEach(cb => {
+    cb.checked = false;
+    onApproveChange(cb);
+  });
+  updateSummary();
+}
+
+// ------------------------------------------------------------------ //
+// Helpers
+// ------------------------------------------------------------------ //
+
+function escHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function escHtmlAttr(s) {
+  if (!s) return '';
+  return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'")
+    .replace(/"/g,'&quot;').replace(/\n/g,' ');
+}
+
+loadResults();
+</script>
+{% endblock %}

@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+{% block title %}Execute — ABS Rename{% endblock %}
+
+{% block content %}
+<div class="flex justify-between items-center" style="margin-bottom:1rem;">
+  <h1>Execute Copy <span class="muted" style="font-size:0.9rem;">Batch #{{ batch_run_id }}</span></h1>
+  <a href="/results/{{ batch_run_id }}" class="btn btn-ghost btn-sm">← Back to Results</a>
+</div>
+
+<div id="pre-flight" class="card">
+  <h2>Approved Plans</h2>
+  <div id="pf-loading" class="muted" style="font-size:0.82rem;">Loading summary…</div>
+  <div id="pf-content" class="hidden">
+    <div class="flex gap-2 items-center" style="margin-bottom:0.75rem;flex-wrap:wrap;">
+      <span style="font-size:0.82rem;">
+        <strong id="pf-count">0</strong> file(s) approved for copy
+      </span>
+      <span id="pf-dry-badge" class="badge badge-blue hidden">DRY RUN</span>
+    </div>
+    <div class="table-wrap" style="max-height:300px;overflow-y:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Source</th>
+            <th>Destination</th>
+            <th>Conflict?</th>
+          </tr>
+        </thead>
+        <tbody id="pf-table"></tbody>
+      </table>
+    </div>
+    <div class="mt-2 flex items-center gap-2" style="flex-wrap:wrap;">
+      <button class="btn btn-success" id="run-btn" onclick="startCopy()">
+        ▶ Run Copy
+      </button>
+      <label class="checkbox-row" style="margin:0;">
+        <input type="checkbox" id="overwrite-cb" />
+        <span style="font-size:0.82rem;">Overwrite existing files</span>
+      </label>
+      <span id="run-note" class="muted" style="font-size:0.82rem;"></span>
+    </div>
+  </div>
+  <div id="pf-empty" class="alert alert-warning hidden">
+    No approved plans found. Go back to Results and approve at least one item.
+  </div>
+</div>
+
+<div id="progress-section" class="card hidden">
+  <h2>Progress</h2>
+  <div class="flex justify-between items-center" style="margin-bottom:0.4rem;">
+    <span id="prog-label" class="muted" style="font-size:0.82rem;">Starting…</span>
+    <span id="prog-count" class="muted" style="font-size:0.82rem;">0 / 0</span>
+  </div>
+  <div class="progress-bar-wrap">
+    <div class="progress-bar" id="progress-bar"></div>
+  </div>
+  <div class="log-list mt-1" id="log-list"></div>
+</div>
+
+<div id="final-summary" class="card hidden">
+  <h2>Copy Complete</h2>
+  <div id="summary-content"></div>
+  <div class="mt-2 flex gap-1">
+    <a href="/history/{{ batch_run_id }}" class="btn btn-ghost btn-sm">View History</a>
+    <a href="/" class="btn btn-primary btn-sm">New Scan</a>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const BATCH_RUN_ID = {{ batch_run_id }};
+let isDryRun = false;
+
+async function loadPreFlight() {
+  try {
+    const res = await fetch(`/api/copy/${BATCH_RUN_ID}/summary`);
+    const data = await res.json();
+    document.getElementById('pf-loading').classList.add('hidden');
+
+    isDryRun = data.is_dry_run;
+    const plans = data.plans || [];
+
+    if (!plans.length) {
+      document.getElementById('pf-empty').classList.remove('hidden');
+      return;
+    }
+
+    document.getElementById('pf-content').classList.remove('hidden');
+    document.getElementById('pf-count').textContent = plans.length;
+    if (isDryRun) {
+      document.getElementById('pf-dry-badge').classList.remove('hidden');
+      document.getElementById('run-note').textContent =
+        'Dry run mode — files will not actually be copied.';
+    }
+
+    renderConflictTable(plans);
+  } catch(e) {
+    document.getElementById('pf-loading').textContent = 'Error loading summary: ' + e.message;
+  }
+}
+
+// Re-render conflict column when overwrite checkbox changes
+document.getElementById('overwrite-cb').addEventListener('change', function() {
+  const plans = window._pfPlans || [];
+  if (plans.length) renderConflictTable(plans);
+});
+
+function conflictBadge(isConflict) {
+  const overwrite = document.getElementById('overwrite-cb').checked;
+  if (!isConflict) return '<span class="badge badge-green">None</span>';
+  return overwrite
+    ? '<span class="badge badge-yellow">Overwrite</span>'
+    : '<span class="badge badge-red">Skip</span>';
+}
+
+function renderConflictTable(plans) {
+    window._pfPlans = plans;
+    const tbody = document.getElementById('pf-table');
+    tbody.innerHTML = '';
+    plans.forEach(p => {
+      const tr = document.createElement('tr');
+      const src = p.source_path || '';
+      const dst = p.full_destination_path || '—';
+      tr.innerHTML = `
+        <td class="path-cell" title="${escHtml(src)}">${escHtml(src.split(/[/\\]/).pop())}</td>
+        <td class="path-cell" title="${escHtml(dst)}">${escHtml(dst)}</td>
+        <td class="conflict-cell">${conflictBadge(p.is_conflict)}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+}
+
+function startCopy() {
+  document.getElementById('run-btn').disabled = true;
+  document.getElementById('progress-section').classList.remove('hidden');
+  document.getElementById('pre-flight').querySelector('.card');
+
+  const logList = document.getElementById('log-list');
+  const progBar = document.getElementById('progress-bar');
+  const progLabel = document.getElementById('prog-label');
+  const progCount = document.getElementById('prog-count');
+
+  const overwrite = document.getElementById('overwrite-cb').checked;
+  const es = new EventSource(`/api/copy/${BATCH_RUN_ID}/stream?overwrite=${overwrite}`);
+
+  es.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    const { index, total, source, destination, status, error, done, summary } = data;
+
+    // Update progress bar
+    if (total > 0) {
+      const pct = Math.round((index / total) * 100);
+      progBar.style.width = pct + '%';
+      progCount.textContent = `${index} / ${total}`;
+    }
+
+    // Log entry
+    const entry = document.createElement('div');
+    const fname = (source || '').split(/[/\\]/).pop() || source;
+    if (status === 'success') {
+      entry.className = 'log-ok';
+      entry.textContent = `✓ ${fname}  →  ${destination}`;
+      progLabel.textContent = `Copying: ${fname}`;
+    } else if (status === 'dry_run') {
+      entry.className = 'log-dry';
+      entry.textContent = `~ [dry run] ${fname}  →  ${destination}`;
+      progLabel.textContent = `Simulating: ${fname}`;
+    } else if (status === 'skipped_conflict') {
+      entry.className = 'log-skip';
+      entry.textContent = `⚠ Skipped — already exists: ${fname}`;
+    } else if (status === 'error') {
+      entry.className = 'log-err';
+      entry.textContent = `✗ Error: ${fname} — ${error}`;
+    }
+
+    if (entry.className) {
+      logList.appendChild(entry);
+      logList.scrollTop = logList.scrollHeight;
+    }
+
+    if (done) {
+      es.close();
+      progBar.style.width = '100%';
+      progLabel.textContent = 'Done';
+      showFinalSummary(summary, isDryRun);
+    }
+  };
+
+  es.onerror = () => {
+    es.close();
+    const entry = document.createElement('div');
+    entry.className = 'log-err';
+    entry.textContent = '✗ Connection to server lost.';
+    logList.appendChild(entry);
+  };
+}
+
+function showFinalSummary(summary, dryRun) {
+  const el = document.getElementById('final-summary');
+  el.classList.remove('hidden');
+
+  if (!summary) {
+    document.getElementById('summary-content').textContent = 'Complete.';
+    return;
+  }
+
+  const mode = dryRun ? ' (dry run)' : '';
+  document.getElementById('summary-content').innerHTML = `
+    <div class="flex gap-2" style="flex-wrap:wrap;font-size:0.875rem;">
+      <div class="card" style="min-width:110px;text-align:center;padding:0.75rem;">
+        <div style="font-size:1.5rem;font-weight:700;color:#4ade80;">${summary.copied}</div>
+        <div class="muted" style="font-size:0.76rem;">Copied${mode}</div>
+      </div>
+      <div class="card" style="min-width:110px;text-align:center;padding:0.75rem;">
+        <div style="font-size:1.5rem;font-weight:700;color:#fbbf24;">${summary.skipped_conflicts}</div>
+        <div class="muted" style="font-size:0.76rem;">Skipped (conflict)</div>
+      </div>
+      <div class="card" style="min-width:110px;text-align:center;padding:0.75rem;">
+        <div style="font-size:1.5rem;font-weight:700;color:#7eb8f7;">${summary.dry_run}</div>
+        <div class="muted" style="font-size:0.76rem;">Dry-run simulated</div>
+      </div>
+      <div class="card" style="min-width:110px;text-align:center;padding:0.75rem;">
+        <div style="font-size:1.5rem;font-weight:700;color:#f87171;">${summary.errors}</div>
+        <div class="muted" style="font-size:0.76rem;">Errors</div>
+      </div>
+    </div>
+  `;
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+loadPreFlight();
+</script>
+{% endblock %}

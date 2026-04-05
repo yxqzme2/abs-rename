@@ -1,0 +1,89 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>abs-rename</Name>
+  <Repository>abs-rename:latest</Repository>
+  <Registry/>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Overview>Local audiobook metadata lookup and file organizer for Audiobookshelf. Scans .m4b files, matches them against the Audible catalog, previews renamed paths, and copies files into a clean folder structure.</Overview>
+  <Category>Tools: MediaApp:Music</Category>
+  <WebUI>http://[IP]:[PORT:8000]/</WebUI>
+  <Icon>http://[IP]:[PORT:8000]/static/icon.svg</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DonateText/>
+  <DonateLink/>
+
+  <!-- Web port -->
+  <Config
+    Name="Web UI Port"
+    Target="8000"
+    Default="8756"
+    Mode="tcp"
+    Description="Port for the ABS Rename web interface."
+    Type="Port"
+    Display="always"
+    Required="true"
+    Mask="false">8756</Config>
+
+  <!-- Persistent data volume (SQLite DB) -->
+  <Config
+    Name="App Data (Database)"
+    Target="/data"
+    Default="/mnt/user/appdata/abs-rename"
+    Mode="rw"
+    Description="Stores the SQLite database. Map to a persistent appdata path so scan history survives container restarts."
+    Type="Path"
+    Display="always"
+    Required="true"
+    Mask="false">/mnt/user/appdata/abs-rename</Config>
+
+  <!-- Source audiobook library -->
+  <Config
+    Name="Audiobooks Source"
+    Target="/audiobooks"
+    Default="/mnt/user/audiobooks"
+    Mode="ro"
+    Description="Root folder containing your existing .m4b files. Read-only — the app never modifies your originals."
+    Type="Path"
+    Display="always"
+    Required="true"
+    Mask="false">/mnt/user/audiobooks</Config>
+
+  <!-- Organized output folder -->
+  <Config
+    Name="Output / Destination"
+    Target="/output"
+    Default="/mnt/user/audiobooks-organized"
+    Mode="rw"
+    Description="Where organized copies are written. You can point this at your live ABS library once you're happy with the results."
+    Type="Path"
+    Display="always"
+    Required="true"
+    Mask="false">/mnt/user/audiobooks-organized</Config>
+
+  <!-- AudNexus region -->
+  <Config
+    Name="AudNexus Region"
+    Target="AUDNEXUS_REGION"
+    Default="us"
+    Description="Audible/AudNexus region for metadata lookups. Options: us, uk, au, ca, de, fr, it, es, jp, in"
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">us</Config>
+
+  <!-- API request pacing -->
+  <Config
+    Name="API Request Delay (ms)"
+    Target="AUDNEXUS_REQUEST_DELAY_MS"
+    Default="400"
+    Description="Milliseconds to wait between AudNexus API calls. Increase if you see rate-limit errors."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">400</Config>
+
+</Container>

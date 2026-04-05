@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- Background -->
+  <rect width="128" height="128" rx="22" fill="#1a1f2e"/>
+
+  <!-- Open book body -->
+  <rect x="18" y="38" width="42" height="52" rx="4" fill="#2d3a5c"/>
+  <rect x="68" y="38" width="42" height="52" rx="4" fill="#2d3a5c"/>
+  <!-- Spine -->
+  <rect x="58" y="38" width="12" height="52" rx="2" fill="#1e2740"/>
+  <!-- Pages lines left -->
+  <line x1="26" y1="52" x2="54" y2="52" stroke="#4a5a8a" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="26" y1="60" x2="54" y2="60" stroke="#4a5a8a" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="26" y1="68" x2="54" y2="68" stroke="#4a5a8a" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="26" y1="76" x2="54" y2="76" stroke="#4a5a8a" stroke-width="2" stroke-linecap="round"/>
+  <!-- Pages lines right -->
+  <line x1="74" y1="52" x2="102" y2="52" stroke="#4a5a8a" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="74" y1="60" x2="102" y2="60" stroke="#4a5a8a" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="74" y1="68" x2="102" y2="68" stroke="#4a5a8a" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="74" y1="76" x2="102" y2="76" stroke="#4a5a8a" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Headphone arc -->
+  <path d="M 42 72 A 22 22 0 0 1 86 72" stroke="#7eb8f7" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <!-- Left ear cup -->
+  <rect x="36" y="70" width="12" height="16" rx="5" fill="#7eb8f7"/>
+  <!-- Right ear cup -->
+  <rect x="80" y="70" width="12" height="16" rx="5" fill="#7eb8f7"/>
+</svg>
