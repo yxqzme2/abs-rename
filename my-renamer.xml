@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>abs-rename</Name>
-  <Repository>abs-rename:latest</Repository>
+  <Repository>ghcr.io/yxqzme2/abs-rename:latest</Repository>
   <Registry/>
   <Network>bridge</Network>
   <Shell>sh</Shell>
