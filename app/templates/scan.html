@@ -64,6 +64,18 @@
   <span id="scan-status" class="muted" style="font-size:0.82rem;"></span>
 </div>
 
+<div id="scan-progress" class="card hidden">
+  <h2>Scanning</h2>
+  <div class="flex justify-between items-center" style="margin-bottom:0.4rem;">
+    <span id="scan-prog-label" class="muted" style="font-size:0.82rem;">Starting…</span>
+    <span id="scan-prog-count" class="muted" style="font-size:0.82rem;"></span>
+  </div>
+  <div class="progress-bar-wrap">
+    <div class="progress-bar" id="scan-progress-bar"></div>
+  </div>
+  <div class="log-list mt-1" id="scan-log-list"></div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -185,72 +197,113 @@ function removeFolder(btn) {
 }
 
 async function startScan() {
-  const btn = document.getElementById('scan-btn');
+  const btn      = document.getElementById('scan-btn');
   const statusEl = document.getElementById('scan-status');
-  const errEl = document.getElementById('scan-error');
+  const errEl    = document.getElementById('scan-error');
   errEl.classList.add('hidden');
 
   const sourceFolders = Array.from(document.querySelectorAll('.source-input'))
-    .map(i => i.value.trim())
-    .filter(Boolean);
-
+    .map(i => i.value.trim()).filter(Boolean);
   const outputFolder = document.getElementById('output-folder').value.trim();
   const isDryRun     = document.getElementById('dry-run').checked;
-  const templateStr  = document.getElementById('template-select').value;
 
-  if (!sourceFolders.length) {
-    showError('Please enter at least one source folder.'); return;
-  }
-  if (!outputFolder) {
-    showError('Please enter an output folder.'); return;
-  }
+  if (!sourceFolders.length) { showError('Please enter at least one source folder.'); return; }
+  if (!outputFolder)         { showError('Please enter an output folder.'); return; }
 
   if (document.getElementById('remember-folders').checked) saveFolders();
-  if (document.getElementById('remember-output').checked) saveOutput();
+  if (document.getElementById('remember-output').checked)  saveOutput();
 
   btn.disabled = true;
-  statusEl.textContent = 'Scanning… this may take a while for large libraries.';
+  statusEl.textContent = 'Starting…';
 
+  // Step 1 — create the BatchRun
+  let batchRunId;
   try {
-    // Find template ID from the saved templates list (if available)
-    // We pass template via the scan request as template_id=null, relying on
-    // the default — or we can pass a custom template by saving it first.
-    // For now: just pass null and let the server use the default.
-    const body = {
-      source_folders: sourceFolders,
-      output_folder:  outputFolder,
-      is_dry_run:     isDryRun,
-      template_id:    null,
-    };
-
     const res = await fetch('/api/scan', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        source_folders: sourceFolders,
+        output_folder:  outputFolder,
+        is_dry_run:     isDryRun,
+        template_id:    null,
+      }),
     });
-
     if (!res.ok) {
       const err = await res.json();
-      throw new Error(err.detail || 'Scan failed');
+      throw new Error(err.detail || 'Failed to start scan');
     }
-
-    const data = await res.json();
-    statusEl.textContent =
-      `Done. Scanned: ${data.total_scanned}, ` +
-      `Matched: ${data.total_matched}, ` +
-      `Review: ${data.total_review_required}, ` +
-      `Unmatched: ${data.total_unmatched}`;
-
-    // Redirect to results page
-    setTimeout(() => {
-      window.location.href = `/results/${data.batch_run_id}`;
-    }, 800);
-
+    batchRunId = (await res.json()).batch_run_id;
   } catch(e) {
     showError(e.message);
     btn.disabled = false;
     statusEl.textContent = '';
+    return;
   }
+
+  // Step 2 — show progress panel and open SSE stream
+  const progSection = document.getElementById('scan-progress');
+  const logList     = document.getElementById('scan-log-list');
+  const progBar     = document.getElementById('scan-progress-bar');
+  const progLabel   = document.getElementById('scan-prog-label');
+  const progCount   = document.getElementById('scan-prog-count');
+  progSection.classList.remove('hidden');
+  statusEl.textContent = '';
+
+  const es = new EventSource(`/api/scan/${batchRunId}/stream`);
+
+  es.onmessage = (event) => {
+    const d = JSON.parse(event.data);
+
+    if (d.type === 'total') {
+      progCount.textContent = `0 / ${d.total}`;
+    }
+
+    if (d.type === 'scanning') {
+      progLabel.textContent = `Scanning: ${d.filename}`;
+      if (d.total > 0) {
+        progBar.style.width = Math.round(((d.index - 1) / d.total) * 100) + '%';
+        progCount.textContent = `${d.index} / ${d.total}`;
+      }
+    }
+
+    if (d.type === 'result') {
+      const entry = document.createElement('div');
+      if (d.status === 'matched') {
+        entry.className = 'log-ok';
+        entry.textContent = `✓ ${d.filename}  →  ${d.matched_title} (${d.confidence}%)`;
+      } else if (d.status === 'review') {
+        entry.className = 'log-dry';
+        entry.textContent = `~ ${d.filename}  →  ${d.matched_title} — review (${d.confidence}%)`;
+      } else {
+        entry.className = 'log-skip';
+        entry.textContent = `✗ ${d.filename}  — no match found`;
+      }
+      logList.appendChild(entry);
+      logList.scrollTop = logList.scrollHeight;
+      if (d.total > 0) {
+        progBar.style.width = Math.round((d.index / d.total) * 100) + '%';
+        progCount.textContent = `${d.index} / ${d.total}`;
+      }
+    }
+
+    if (d.type === 'done') {
+      es.close();
+      progBar.style.width = '100%';
+      progLabel.textContent =
+        `Done — ${d.total_matched} matched, ${d.total_review_required} review, ${d.total_unmatched} unmatched`;
+      setTimeout(() => { window.location.href = `/results/${d.batch_run_id}`; }, 1200);
+    }
+  };
+
+  es.onerror = () => {
+    es.close();
+    const entry = document.createElement('div');
+    entry.className = 'log-err';
+    entry.textContent = '✗ Connection lost — check server logs.';
+    logList.appendChild(entry);
+    btn.disabled = false;
+  };
 
   function showError(msg) {
     errEl.textContent = msg;
