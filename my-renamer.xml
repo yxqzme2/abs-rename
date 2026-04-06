@@ -9,7 +9,7 @@
   <Overview>Local audiobook metadata lookup and file organizer for Audiobookshelf. Scans .m4b files, matches them against the Audible catalog, previews renamed paths, and copies files into a clean folder structure.</Overview>
   <Category>Tools: MediaApp:Music</Category>
   <WebUI>http://[IP]:[PORT:8000]/</WebUI>
-  <Icon>https://raw.githubusercontent.com/yxqzme2/abs-rename/main/app/static/icon.svg</Icon>
+  <Icon>https://raw.githubusercontent.com/yxqzme2/abs-rename/main/app/static/icon.png</Icon>
   <ExtraParams/>
   <PostArgs/>
   <CPUset/>
