@@ -85,6 +85,9 @@ async def execute_copies(
         "dry_run":           0,
     }
 
+    # Track which folders were successfully copied for permission fixes
+    copied_folders: set[Path] = set()
+
     if total == 0:
         yield {
             "index": 0, "total": 0,
@@ -194,6 +197,7 @@ async def execute_copies(
                 op.status = CopyStatus.SUCCESS
                 event["status"] = "success"
                 summary["mp3_moved"] += 1
+                copied_folders.add(actual_dest)
                 logger.info("Copied MP3 folder: %s -> %s", actual_source, actual_dest)
             else:
                 # M4B/M4A: copy file to destination
@@ -207,6 +211,7 @@ async def execute_copies(
                 op.status = CopyStatus.SUCCESS
                 event["status"] = "success"
                 summary["m4b_copied"] += 1
+                copied_folders.add(actual_dest.parent)
                 logger.info("Copied: %s -> %s", actual_source, actual_dest)
 
             # --- Optional: delete source after successful copy/move ---
@@ -227,6 +232,9 @@ async def execute_copies(
         await _persist_op(op)
         if index == total:
             event["summary"] = summary
+            # Fix permissions on all copied folders so SMB/Unraid can access them
+            if copied_folders and not is_dry_run:
+                await _fix_destination_permissions(copied_folders)
         yield event
 
 
@@ -337,6 +345,40 @@ async def _delete_source(source_path: str, audio_format: str) -> None:
                 pass
     except OSError as exc:
         logger.warning("Could not delete source %s: %s", source_path, exc)
+
+
+async def _fix_destination_permissions(folders: set[Path]) -> None:
+    """
+    Fix permissions on all destination folders so SMB shares can access them.
+    On Unraid/Linux, Docker-created files are often root:root and need chmod.
+    This runs after all copies are complete.
+    """
+    if not folders:
+        return
+
+    try:
+        def _chmod_recursive() -> None:
+            import os
+            import stat
+            for target in folders:
+                if not target.exists():
+                    continue
+                for root, dirs, files in os.walk(str(target)):
+                    for d in dirs:
+                        try:
+                            os.chmod(os.path.join(root, d), stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
+                        except OSError:
+                            pass
+                    for f in files:
+                        try:
+                            os.chmod(os.path.join(root, f), stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH)
+                        except OSError:
+                            pass
+
+        await asyncio.get_event_loop().run_in_executor(None, _chmod_recursive)
+        logger.info("Fixed permissions on %d destination folder(s)", len(folders))
+    except Exception as exc:
+        logger.warning("Could not fix permissions: %s", exc)
 
 
 async def _persist_op(op: CopyOperation) -> None:
