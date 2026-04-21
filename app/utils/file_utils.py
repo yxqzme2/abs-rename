@@ -40,7 +40,7 @@ def file_size_bytes(path: str | Path) -> int:
 def scan_m4b_files(folder: str | Path) -> list[Path]:
     """
     Recursively find all supported audiobook files (.m4b, .m4a, .mp3) under the given folder.
-    Returns a sorted list of absolute Paths.
+    Returns a sorted list of absolute Paths (files only, not directories).
     """
     root = Path(folder)
     if not root.is_dir():
@@ -49,7 +49,7 @@ def scan_m4b_files(folder: str | Path) -> list[Path]:
 
     found = []
     for ext in ['*.m4b', '*.m4a', '*.mp3']:
-        found.extend(root.rglob(ext))
+        found.extend([f for f in root.rglob(ext) if f.is_file()])
 
     found = sorted(set(found))  # Remove duplicates and sort
     logger.info("Found %d audiobook file(s) under %s", len(found), folder)
