@@ -35,7 +35,9 @@ DATABASE_PATH: str = _get("DATABASE_PATH") or str(
 )
 
 # --- Output ---
-DEFAULT_OUTPUT_FOLDER: str = _get("DEFAULT_OUTPUT_FOLDER")
+# Default to /output (the mounted container path in Docker/Unraid)
+# Can be overridden via DEFAULT_OUTPUT_FOLDER environment variable
+DEFAULT_OUTPUT_FOLDER: str = _get("DEFAULT_OUTPUT_FOLDER", "/output")
 
 # --- AudNexus provider ---
 AUDNEXUS_BASE_URL: str = _get("AUDNEXUS_BASE_URL", "https://api.audnexus.app")
