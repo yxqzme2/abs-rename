@@ -9,7 +9,8 @@
       "Bash(git commit -m 'Debug: add detailed logging to permission fix and use subprocess for chmod *)",
       "Bash(git commit -m 'Fix MP3 destination: use source folder name as fallback *)",
       "Bash(git commit -m 'Fix: use container environment for output folder, not user input *)",
-      "Bash(git commit -m 'Default DEFAULT_OUTPUT_FOLDER to /output if not set *)"
+      "Bash(git commit -m 'Default DEFAULT_OUTPUT_FOLDER to /output if not set *)",
+      "Bash(git commit -m 'Add MP3 hand-off folder field to scan page *)"
     ]
   }
 }

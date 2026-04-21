@@ -25,16 +25,26 @@
 </div>
 
 <div class="card">
-  <h2>Output Folder</h2>
-  <p class="muted" style="margin-bottom:0.75rem;font-size:0.82rem;">
-    Where organized copies will be written. Originals are never touched.
-  </p>
+  <h2>Output Folders</h2>
   <div class="form-group">
-    <input type="text" id="output-folder" placeholder="e.g. C:\Audiobooks\Organized" />
+    <label style="font-size:0.85rem;font-weight:500;margin-bottom:0.3rem;display:block;">M4B Output Folder</label>
+    <p class="muted" style="margin-bottom:0.5rem;font-size:0.78rem;">
+      Where M4B/M4A files are organized and copied.
+    </p>
+    <input type="text" id="output-folder" placeholder="Leave blank to use default (/output)" />
   </div>
-  <label class="checkbox-row" style="margin-top:0.4rem;font-size:0.78rem;">
+
+  <div class="form-group" style="margin-top:1rem;">
+    <label style="font-size:0.85rem;font-weight:500;margin-bottom:0.3rem;display:block;">MP3 Hand-off Folder (optional)</label>
+    <p class="muted" style="margin-bottom:0.5rem;font-size:0.78rem;">
+      Where MP3 files are moved for external converter. Leave blank to disable MP3 processing.
+    </p>
+    <input type="text" id="mp3-folder" placeholder="e.g. /mp3-convert" />
+  </div>
+
+  <label class="checkbox-row" style="margin-top:0.75rem;font-size:0.78rem;">
     <input type="checkbox" id="remember-output" />
-    <span>Remember this folder next time</span>
+    <span>Remember these folders next time</span>
   </label>
 </div>
 
@@ -127,7 +137,9 @@ function saveFolders() {
 
 function saveOutput() {
   const output = document.getElementById('output-folder').value.trim();
+  const mp3 = document.getElementById('mp3-folder').value.trim();
   localStorage.setItem('abs_output_folder', output);
+  localStorage.setItem('abs_mp3_folder', mp3);
 }
 
 function loadSavedFolders() {
@@ -157,7 +169,9 @@ function loadSavedFolders() {
 
     if (rememberOut) {
       const output = localStorage.getItem('abs_output_folder') || '';
+      const mp3 = localStorage.getItem('abs_mp3_folder') || '';
       if (output) document.getElementById('output-folder').value = output;
+      if (mp3) document.getElementById('mp3-folder').value = mp3;
     }
   } catch(e) { /* ignore corrupt storage */ }
 }
@@ -205,10 +219,10 @@ async function startScan() {
   const sourceFolders = Array.from(document.querySelectorAll('.source-input'))
     .map(i => i.value.trim()).filter(Boolean);
   const outputFolder = document.getElementById('output-folder').value.trim();
+  const mp3Folder = document.getElementById('mp3-folder').value.trim();
   const isDryRun     = document.getElementById('dry-run').checked;
 
   if (!sourceFolders.length) { showError('Please enter at least one source folder.'); return; }
-  if (!outputFolder)         { showError('Please enter an output folder.'); return; }
 
   if (document.getElementById('remember-folders').checked) saveFolders();
   if (document.getElementById('remember-output').checked)  saveOutput();
@@ -224,7 +238,8 @@ async function startScan() {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
         source_folders: sourceFolders,
-        output_folder:  outputFolder,
+        output_folder:  outputFolder || null,
+        mp3_handoff_folder: mp3Folder || null,
         is_dry_run:     isDryRun,
         template_id:    null,
       }),

@@ -49,6 +49,7 @@ router = APIRouter()
 class ScanRequest(BaseModel):
     source_folders: list[str]
     output_folder:  str | None = None  # Optional — uses DEFAULT_OUTPUT_FOLDER if None
+    mp3_handoff_folder: str | None = None  # Optional MP3 hand-off folder (overrides config)
     template_id:    int | None = None
     is_dry_run:     bool = True
 
