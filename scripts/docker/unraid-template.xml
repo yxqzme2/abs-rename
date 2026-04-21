@@ -6,7 +6,7 @@
   <Network>bridge</Network>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Overview>Local audiobook metadata lookup and file organizer for Audiobookshelf. Scans .m4b files, matches them against the Audible catalog, previews renamed paths, and copies files into a clean folder structure.</Overview>
+  <Overview>Local audiobook metadata lookup and file organizer for Audiobookshelf. Scans .m4b and .mp3 files, matches them against the Audible catalog, previews renamed paths, copies/organizes M4B files, and hands off MP3 files for external conversion.</Overview>
   <Category>Tools: MediaApp:Music</Category>
   <WebUI>http://[IP]:[PORT:8000]/</WebUI>
   <Icon>https://raw.githubusercontent.com/yxqzme2/abs-rename/main/app/static/icon.png</Icon>
@@ -42,15 +42,15 @@
 
   <!-- Source audiobook library -->
   <Config
-    Name="Audiobooks Source"
-    Target="/audiobooks"
-    Default="/mnt/user/audiobooks"
-    Mode="ro"
-    Description="Root folder containing your existing .m4b files. Read-only — the app never modifies your originals."
+    Name="Source Folder"
+    Target="/downloads"
+    Default="/mnt/user/Downloads"
+    Mode="rw"
+    Description="Root folder containing your .m4b and/or .mp3 files. Read-write is needed for delete-after functionality."
     Type="Path"
     Display="always"
     Required="true"
-    Mask="false">/mnt/user/audiobooks</Config>
+    Mask="false">/mnt/user/Downloads</Config>
 
   <!-- Organized output folder -->
   <Config
