@@ -81,6 +81,9 @@ async def scan_folders(
     Scan all source folders, read metadata, persist to DB, and return
     a list of (LocalAudiobook, LocalMetadata) pairs.
 
+    For M4B files: one record per file
+    For MP3 files: one record per folder (chapters grouped together)
+
     Args:
         batch_run_id:    FK to the active BatchRun
         source_folders:  list of absolute folder paths to scan
@@ -97,75 +100,114 @@ async def scan_folders(
 
     logger.info("Total audiobook files found: %d", len(all_files))
 
+    # Separate M4B and MP3 files
+    m4b_files = [f for f in all_files if f.suffix.lower() in {'.m4b', '.m4a'}]
+    mp3_files = [f for f in all_files if f.suffix.lower() == '.mp3']
+
+    # Group MP3 files by parent folder
+    mp3_folders: dict[Path, list[Path]] = {}
+    for f in mp3_files:
+        parent = f.parent
+        if parent not in mp3_folders:
+            mp3_folders[parent] = []
+        mp3_folders[parent].append(f)
+
+    logger.info("M4B files: %d, MP3 folders: %d", len(m4b_files), len(mp3_folders))
+
     async with get_db() as db:
-        for file_path in all_files:
-            # --- Create LocalAudiobook record ---
-            audiobook = LocalAudiobook(
-                batch_run_id=batch_run_id,
-                source_path=str(file_path),
-                filename=file_path.name,
-                folder_path=str(file_path.parent),
-                extension=file_path.suffix.lower(),
-                file_size=file_size_bytes(file_path),
-                audio_format=get_audio_format(file_path),
-                scan_status=ScanStatus.PENDING,
-            )
+        # --- Process M4B files (one per file) ---
+        for file_path in m4b_files:
+            await _process_audiobook(db, batch_run_id, file_path, results)
 
-            cursor = await db.execute(
-                """
-                INSERT INTO local_audiobooks
-                    (batch_run_id, source_path, filename, folder_path,
-                     extension, file_size, audio_format, scan_status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    audiobook.batch_run_id,
-                    audiobook.source_path,
-                    audiobook.filename,
-                    audiobook.folder_path,
-                    audiobook.extension,
-                    audiobook.file_size,
-                    audiobook.audio_format,
-                    audiobook.scan_status.value,
-                ),
-            )
-            audiobook.id = cursor.lastrowid
+        # --- Process MP3 folders (one per folder) ---
+        for folder_path, mp3_list in mp3_folders.items():
+            # Representative file: the first MP3 in the folder
+            representative_file = sorted(mp3_list)[0]
+            await _process_audiobook(db, batch_run_id, representative_file, results, is_mp3_folder=True)
 
-            # --- Read metadata from tags ---
-            metadata = read_metadata(file_path, audiobook.id)
-
-            await db.execute(
-                """
-                INSERT INTO local_metadata
-                    (local_audiobook_id, duration_seconds,
-                     title_from_tags, author_from_tags, album_from_tags,
-                     narrator_from_tags, series_from_tags,
-                     series_index_from_tags, has_embedded_cover, raw_tags_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    metadata.local_audiobook_id,
-                    metadata.duration_seconds,
-                    metadata.title_from_tags,
-                    metadata.author_from_tags,
-                    metadata.album_from_tags,
-                    metadata.narrator_from_tags,
-                    metadata.series_from_tags,
-                    metadata.series_index_from_tags,
-                    int(metadata.has_embedded_cover),
-                    metadata.raw_tags_json,
-                ),
-            )
-
-            # --- Update scan status to 'scanned' ---
-            await db.execute(
-                "UPDATE local_audiobooks SET scan_status = ? WHERE id = ?",
-                (ScanStatus.SCANNED.value, audiobook.id),
-            )
-            audiobook.scan_status = ScanStatus.SCANNED
-
-            results.append((audiobook, metadata))
-            logger.debug("Scanned: %s", file_path.name)
-
-    logger.info("Scan complete. %d files processed.", len(results))
+    logger.info("Scan complete. %d audiobook(s) processed.", len(results))
     return results
+
+
+async def _process_audiobook(
+    db,
+    batch_run_id: int,
+    file_path: Path,
+    results: list,
+    is_mp3_folder: bool = False,
+) -> None:
+    """
+    Create and persist a LocalAudiobook + LocalMetadata record.
+    For MP3 folders, use the folder path as source_path (not individual file).
+    """
+    source_path = str(file_path.parent) if is_mp3_folder else str(file_path)
+    filename = file_path.parent.name if is_mp3_folder else file_path.name
+
+    # --- Create LocalAudiobook record ---
+    audiobook = LocalAudiobook(
+        batch_run_id=batch_run_id,
+        source_path=source_path,
+        filename=filename,
+        folder_path=str(file_path.parent),
+        extension=file_path.suffix.lower(),
+        file_size=file_size_bytes(file_path) if not is_mp3_folder else 0,
+        audio_format=get_audio_format(file_path),
+        scan_status=ScanStatus.PENDING,
+    )
+
+    cursor = await db.execute(
+        """
+        INSERT INTO local_audiobooks
+            (batch_run_id, source_path, filename, folder_path,
+             extension, file_size, audio_format, scan_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            audiobook.batch_run_id,
+            audiobook.source_path,
+            audiobook.filename,
+            audiobook.folder_path,
+            audiobook.extension,
+            audiobook.file_size,
+            audiobook.audio_format,
+            audiobook.scan_status.value,
+        ),
+    )
+    audiobook.id = cursor.lastrowid
+
+    # --- Read metadata from tags ---
+    metadata = read_metadata(file_path, audiobook.id)
+
+    await db.execute(
+        """
+        INSERT INTO local_metadata
+            (local_audiobook_id, duration_seconds,
+             title_from_tags, author_from_tags, album_from_tags,
+             narrator_from_tags, series_from_tags,
+             series_index_from_tags, has_embedded_cover, raw_tags_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            metadata.local_audiobook_id,
+            metadata.duration_seconds,
+            metadata.title_from_tags,
+            metadata.author_from_tags,
+            metadata.album_from_tags,
+            metadata.narrator_from_tags,
+            metadata.series_from_tags,
+            metadata.series_index_from_tags,
+            int(metadata.has_embedded_cover),
+            metadata.raw_tags_json,
+        ),
+    )
+
+    # --- Update scan status to 'scanned' ---
+    await db.execute(
+        "UPDATE local_audiobooks SET scan_status = ? WHERE id = ?",
+        (ScanStatus.SCANNED.value, audiobook.id),
+    )
+    audiobook.scan_status = ScanStatus.SCANNED
+
+    results.append((audiobook, metadata))
+    record_type = "MP3 folder" if is_mp3_folder else "file"
+    logger.debug("Scanned %s: %s", record_type, filename)
