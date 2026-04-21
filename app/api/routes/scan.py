@@ -28,6 +28,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app.config import DEFAULT_OUTPUT_FOLDER
 from app.db.connection import get_db
 from app.db.queries.batch_runs import (
     create_batch_run,
@@ -47,7 +48,7 @@ router = APIRouter()
 
 class ScanRequest(BaseModel):
     source_folders: list[str]
-    output_folder:  str
+    output_folder:  str | None = None  # Optional — uses DEFAULT_OUTPUT_FOLDER if None
     template_id:    int | None = None
     is_dry_run:     bool = True
 
@@ -64,8 +65,11 @@ async def start_scan(request: ScanRequest):
     """
     if not request.source_folders:
         raise HTTPException(status_code=400, detail="No source folders provided.")
-    if not request.output_folder:
-        raise HTTPException(status_code=400, detail="No output folder provided.")
+
+    # Use provided output folder or fall back to environment config
+    output_folder = request.output_folder or DEFAULT_OUTPUT_FOLDER
+    if not output_folder:
+        raise HTTPException(status_code=400, detail="No output folder configured (set DEFAULT_OUTPUT_FOLDER in container environment).")
 
     # Resolve template
     template_row = await get_default_template()
@@ -84,7 +88,7 @@ async def start_scan(request: ScanRequest):
 
     run = BatchRun(
         source_folders=request.source_folders,
-        output_folder=request.output_folder,
+        output_folder=output_folder,
         template_used=template_string,
         is_dry_run=request.is_dry_run,
         started_at=datetime.utcnow().isoformat(),

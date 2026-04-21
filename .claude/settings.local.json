@@ -7,7 +7,8 @@
       "Bash(git commit -m 'Fix MP3 hand-off: simple folder names and copy \\(not move\\) by default *)",
       "Bash(git commit -m 'Auto-fix file permissions on destination folders after copy *)",
       "Bash(git commit -m 'Debug: add detailed logging to permission fix and use subprocess for chmod *)",
-      "Bash(git commit -m 'Fix MP3 destination: use source folder name as fallback *)"
+      "Bash(git commit -m 'Fix MP3 destination: use source folder name as fallback *)",
+      "Bash(git commit -m 'Fix: use container environment for output folder, not user input *)"
     ]
   }
 }

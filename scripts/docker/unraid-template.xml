@@ -64,6 +64,17 @@
     Required="true"
     Mask="false">/mnt/user/audiobooks-organized</Config>
 
+  <!-- Output folder environment variable -->
+  <Config
+    Name="Output Folder (Env)"
+    Target="DEFAULT_OUTPUT_FOLDER"
+    Default="/output"
+    Description="Container path where organized files are written (corresponds to the Output / Destination volume mount)"
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">/output</Config>
+
   <!-- AudNexus region -->
   <Config
     Name="AudNexus Region"
