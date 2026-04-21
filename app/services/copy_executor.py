@@ -116,9 +116,13 @@ async def execute_copies(
 
         # Determine operation type and actual destination
         if audio_format == "mp3" and mp3_handoff_folder:
-            operation_type = OperationType.MOVE
-            # For MP3: move to hand-off folder with renamed parent folder
-            actual_dest = _calculate_mp3_destination(dest_path, mp3_handoff_folder)
+            operation_type = OperationType.COPY
+            # For MP3: copy to hand-off folder with simple name (series_index)
+            actual_dest = _calculate_mp3_destination(
+                mp3_handoff_folder,
+                audiobook_info.get("series_from_tags"),
+                audiobook_info.get("series_index_from_tags"),
+            )
         else:
             operation_type = OperationType.COPY
             actual_dest = dest_path
@@ -182,15 +186,15 @@ async def execute_copies(
             yield event
             continue
 
-        # --- Actual copy or move ---
+        # --- Actual copy ---
         try:
-            if operation_type == OperationType.MOVE:
-                # MP3: move source file's parent folder to hand-off location with renamed folder
-                await _move_mp3_to_handoff(actual_source, actual_dest)
+            if audio_format == "mp3":
+                # MP3: copy source folder's contents to hand-off location
+                await _copy_mp3_to_handoff(actual_source, actual_dest)
                 op.status = CopyStatus.SUCCESS
                 event["status"] = "success"
                 summary["mp3_moved"] += 1
-                logger.info("Moved MP3: %s -> %s", actual_source, actual_dest)
+                logger.info("Copied MP3 folder: %s -> %s", actual_source, actual_dest)
             else:
                 # M4B/M4A: copy file to destination
                 ensure_dir(actual_dest.parent)
@@ -228,14 +232,21 @@ async def execute_copies(
 
 async def _get_audiobook_info(local_audiobook_id: int | None) -> dict | None:
     """
-    Retrieve audiobook source path and audio format by ID.
-    Returns dict with 'source_path' and 'audio_format', or None if not found.
+    Retrieve audiobook source path, audio format, and metadata (series, index) by ID.
+    Returns dict with 'source_path', 'audio_format', 'series_from_tags', 'series_index_from_tags'.
     """
     if local_audiobook_id is None:
         return None
     async with get_db() as db:
         cursor = await db.execute(
-            "SELECT source_path, audio_format FROM local_audiobooks WHERE id = ?",
+            """
+            SELECT
+                la.source_path, la.audio_format,
+                lm.series_from_tags, lm.series_index_from_tags
+            FROM local_audiobooks la
+            LEFT JOIN local_metadata lm ON lm.local_audiobook_id = la.id
+            WHERE la.id = ?
+            """,
             (local_audiobook_id,),
         )
         row = await cursor.fetchone()
@@ -243,66 +254,87 @@ async def _get_audiobook_info(local_audiobook_id: int | None) -> dict | None:
         return {
             "source_path": row["source_path"],
             "audio_format": row["audio_format"] or "m4b",
+            "series_from_tags": row["series_from_tags"],
+            "series_index_from_tags": row["series_index_from_tags"],
         }
     return None
 
 
-def _calculate_mp3_destination(dest_path: Path, mp3_handoff_folder: str) -> Path:
+def _calculate_mp3_destination(
+    mp3_handoff_folder: str,
+    series_name: str | None,
+    series_index: str | None,
+) -> Path:
     """
-    Calculate the destination path for MP3 hand-off.
-    Moves the entire folder structure to mp3_handoff_folder.
-    Example: /output/Author/Series/01 - Title/01 - Title.mp3
-             -> /mp3-handoff/Author/Series/01 - Title/01 - Title.mp3
+    Calculate the destination folder for MP3 hand-off using a simple flat structure.
+    Creates a folder named {series_name}_{series_index} under mp3_handoff_folder.
+    Example: Series: "Universe Series", Index: "08" -> /mp3-convert/Universe Series_08/
+    Falls back to "{series_name}" or "Unknown_Book" if index is missing.
     """
-    # Reconstruct the path relative to root, place under mp3_handoff_folder
-    # dest_path is like: /output/Author/Series/01 - Title/01 - Title.mp3
-    # Get the relative parts: Author/Series/01 - Title/01 - Title.mp3
-    # Put them under mp3_handoff_folder
-    parts = dest_path.parts[1:]  # Skip the root drive/volume
-    mp3_dest = Path(mp3_handoff_folder) / Path(*parts)
-    return mp3_dest
+    folder_name = "Unknown_Book"
+
+    if series_name and series_index:
+        folder_name = f"{series_name}_{series_index}"
+    elif series_name:
+        folder_name = series_name
+
+    return Path(mp3_handoff_folder) / folder_name
 
 
-async def _move_mp3_to_handoff(source_path: str, dest_path: Path) -> None:
+async def _copy_mp3_to_handoff(source_path: str, dest_path: Path) -> None:
     """
-    Move MP3 file and its parent folder to the hand-off destination.
-    The parent folder is renamed according to the destination path structure.
+    Copy all files from source MP3 folder to the hand-off destination folder.
+    source_path is a folder like /downloads/System Clash/
+    dest_path is the target folder like /mp3-convert/System Universe Series_08/
+    All files from source are copied to dest (not individual file copy).
     """
     source = Path(source_path)
-    ensure_dir(dest_path.parent)
+    ensure_dir(dest_path)
 
-    # Run the blocking move in a thread pool
-    await asyncio.get_event_loop().run_in_executor(
-        None,
-        shutil.move,
-        str(source),
-        str(dest_path),
-    )
+    def _copy_folder_contents() -> None:
+        if not source.is_dir():
+            raise OSError(f"Source is not a directory: {source}")
+        for item in source.iterdir():
+            if item.is_file():
+                dest_file = dest_path / item.name
+                shutil.copy2(str(item), str(dest_file))
+
+    await asyncio.get_event_loop().run_in_executor(None, _copy_folder_contents)
 
 
 async def _delete_source(source_path: str, audio_format: str) -> None:
     """
-    Delete the source file after successful copy/move.
-    For MP3 moves, the parent folder may already be moved, so skip it.
+    Delete the source file/folder after successful copy.
+    - For M4B/M4A: deletes the file (and tries to remove empty parent folders)
+    - For MP3: deletes the entire source folder and all its contents
     """
     source = Path(source_path)
     if not source.exists():
-        logger.debug("Source already deleted or moved: %s", source_path)
+        logger.debug("Source already deleted: %s", source_path)
         return
 
     try:
-        # Delete the file
-        source.unlink()
-        logger.debug("Deleted: %s", source_path)
+        if audio_format == "mp3":
+            # MP3: delete entire folder and contents
+            def _delete_folder() -> None:
+                import shutil
+                shutil.rmtree(str(source), ignore_errors=False)
 
-        # Try to remove parent folder if empty
-        parent = source.parent
-        try:
-            parent.rmdir()
-            logger.debug("Removed empty folder: %s", parent)
-        except OSError:
-            # Folder not empty or other error, that's okay
-            pass
+            await asyncio.get_event_loop().run_in_executor(None, _delete_folder)
+            logger.debug("Deleted MP3 folder: %s", source_path)
+        else:
+            # M4B/M4A: delete single file
+            source.unlink()
+            logger.debug("Deleted: %s", source_path)
+
+            # Try to remove parent folder if empty
+            parent = source.parent
+            try:
+                parent.rmdir()
+                logger.debug("Removed empty folder: %s", parent)
+            except OSError:
+                # Folder not empty or other error, that's okay
+                pass
     except OSError as exc:
         logger.warning("Could not delete source %s: %s", source_path, exc)
 
