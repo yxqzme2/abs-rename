@@ -18,6 +18,12 @@ class CopyStatus(str, Enum):
     SKIPPED_CONFLICT  = "skipped_conflict"
     ERROR             = "error"
     DRY_RUN           = "dry_run"
+    DELETED           = "deleted"
+
+
+class OperationType(str, Enum):
+    COPY = "copy"    # M4B/M4A files
+    MOVE = "move"    # MP3 files
 
 
 class CopyOperation(BaseModel):
@@ -25,6 +31,7 @@ class CopyOperation(BaseModel):
     batch_run_id:     int
     source_path:      str
     destination_path: str
+    operation_type:   OperationType = OperationType.COPY  # 'copy' or 'move'
     status:           CopyStatus = CopyStatus.PENDING
     error_message:    str | None = None
     timestamp:        str = Field(

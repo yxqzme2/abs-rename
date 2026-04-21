@@ -37,6 +37,10 @@
         <input type="checkbox" id="overwrite-cb" />
         <span style="font-size:0.82rem;">Overwrite existing files</span>
       </label>
+      <label class="checkbox-row" style="margin:0;">
+        <input type="checkbox" id="delete-after-cb" />
+        <span style="font-size:0.82rem;">Delete source files after copy</span>
+      </label>
       <span id="run-note" class="muted" style="font-size:0.82rem;"></span>
     </div>
   </div>
@@ -142,7 +146,10 @@ function startCopy() {
   const progCount = document.getElementById('prog-count');
 
   const overwrite = document.getElementById('overwrite-cb').checked;
-  const es = new EventSource(`/api/copy/${BATCH_RUN_ID}/stream?overwrite=${overwrite}`);
+  const deleteAfter = document.getElementById('delete-after-cb').checked;
+  const es = new EventSource(
+    `/api/copy/${BATCH_RUN_ID}/stream?overwrite=${overwrite}&delete_after=${deleteAfter}`
+  );
 
   es.onmessage = (event) => {
     const data = JSON.parse(event.data);
@@ -158,20 +165,24 @@ function startCopy() {
     // Log entry
     const entry = document.createElement('div');
     const fname = (source || '').split(/[/\\]/).pop() || source;
+    const opLabel = data.operation === 'move' ? '[MP3]' : '[M4B]';
+
     if (status === 'success') {
       entry.className = 'log-ok';
-      entry.textContent = `✓ ${fname}  →  ${destination}`;
-      progLabel.textContent = `Copying: ${fname}`;
+      const verb = data.operation === 'move' ? 'Moved' : 'Copied';
+      entry.textContent = `✓ ${opLabel} ${verb}: ${fname}`;
+      progLabel.textContent = `${verb}: ${fname}`;
     } else if (status === 'dry_run') {
       entry.className = 'log-dry';
-      entry.textContent = `~ [dry run] ${fname}  →  ${destination}`;
+      const verb = data.operation === 'move' ? 'move' : 'copy';
+      entry.textContent = `~ [dry run] ${opLabel} would ${verb}: ${fname}`;
       progLabel.textContent = `Simulating: ${fname}`;
     } else if (status === 'skipped_conflict') {
       entry.className = 'log-skip';
-      entry.textContent = `⚠ Skipped — already exists: ${fname}`;
+      entry.textContent = `⚠ ${opLabel} Skipped — already exists: ${fname}`;
     } else if (status === 'error') {
       entry.className = 'log-err';
-      entry.textContent = `✗ Error: ${fname} — ${error}`;
+      entry.textContent = `✗ ${opLabel} Error: ${fname} — ${error}`;
     }
 
     if (entry.className) {
@@ -206,26 +217,65 @@ function showFinalSummary(summary, dryRun) {
   }
 
   const mode = dryRun ? ' (dry run)' : '';
-  document.getElementById('summary-content').innerHTML = `
-    <div class="flex gap-2" style="flex-wrap:wrap;font-size:0.875rem;">
+  const m4bCopied = summary.m4b_copied || 0;
+  const mp3Moved = summary.mp3_moved || 0;
+  const deleted = summary.deleted || 0;
+  const skipped = summary.skipped_conflicts || 0;
+  const dryRunCount = summary.dry_run || 0;
+  const errors = summary.errors || 0;
+
+  let summaryHtml = '<div class="flex gap-2" style="flex-wrap:wrap;font-size:0.875rem;">';
+
+  if (m4bCopied > 0) {
+    summaryHtml += `
       <div class="card" style="min-width:110px;text-align:center;padding:0.75rem;">
-        <div style="font-size:1.5rem;font-weight:700;color:#4ade80;">${summary.copied}</div>
-        <div class="muted" style="font-size:0.76rem;">Copied${mode}</div>
-      </div>
+        <div style="font-size:1.5rem;font-weight:700;color:#4ade80;">${m4bCopied}</div>
+        <div class="muted" style="font-size:0.76rem;">M4B Copied${mode}</div>
+      </div>`;
+  }
+
+  if (mp3Moved > 0) {
+    summaryHtml += `
       <div class="card" style="min-width:110px;text-align:center;padding:0.75rem;">
-        <div style="font-size:1.5rem;font-weight:700;color:#fbbf24;">${summary.skipped_conflicts}</div>
+        <div style="font-size:1.5rem;font-weight:700;color:#60a5fa;">${mp3Moved}</div>
+        <div class="muted" style="font-size:0.76rem;">MP3 Handed Off</div>
+      </div>`;
+  }
+
+  if (deleted > 0) {
+    summaryHtml += `
+      <div class="card" style="min-width:110px;text-align:center;padding:0.75rem;">
+        <div style="font-size:1.5rem;font-weight:700;color:#a78bfa;">${deleted}</div>
+        <div class="muted" style="font-size:0.76rem;">Deleted</div>
+      </div>`;
+  }
+
+  if (skipped > 0) {
+    summaryHtml += `
+      <div class="card" style="min-width:110px;text-align:center;padding:0.75rem;">
+        <div style="font-size:1.5rem;font-weight:700;color:#fbbf24;">${skipped}</div>
         <div class="muted" style="font-size:0.76rem;">Skipped (conflict)</div>
-      </div>
+      </div>`;
+  }
+
+  if (dryRunCount > 0) {
+    summaryHtml += `
       <div class="card" style="min-width:110px;text-align:center;padding:0.75rem;">
-        <div style="font-size:1.5rem;font-weight:700;color:#7eb8f7;">${summary.dry_run}</div>
+        <div style="font-size:1.5rem;font-weight:700;color:#7eb8f7;">${dryRunCount}</div>
         <div class="muted" style="font-size:0.76rem;">Dry-run simulated</div>
-      </div>
+      </div>`;
+  }
+
+  if (errors > 0) {
+    summaryHtml += `
       <div class="card" style="min-width:110px;text-align:center;padding:0.75rem;">
-        <div style="font-size:1.5rem;font-weight:700;color:#f87171;">${summary.errors}</div>
+        <div style="font-size:1.5rem;font-weight:700;color:#f87171;">${errors}</div>
         <div class="muted" style="font-size:0.76rem;">Errors</div>
-      </div>
-    </div>
-  `;
+      </div>`;
+  }
+
+  summaryHtml += '</div>';
+  document.getElementById('summary-content').innerHTML = summaryHtml;
 }
 
 function escHtml(s) {

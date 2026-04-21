@@ -17,7 +17,7 @@ from pathlib import Path
 from app.db.connection import get_db
 from app.models.local_audiobook import LocalAudiobook, LocalMetadata, ScanStatus
 from app.services.metadata_reader import read_metadata
-from app.utils.file_utils import scan_m4b_files, file_size_bytes
+from app.utils.file_utils import scan_m4b_files, file_size_bytes, get_audio_format
 
 logger = logging.getLogger(__name__)
 
@@ -90,12 +90,12 @@ async def scan_folders(
     """
     results: list[tuple[LocalAudiobook, LocalMetadata]] = []
 
-    # Collect all .m4b paths across all source folders
+    # Collect all audiobook files across all source folders
     all_files: list[Path] = []
     for folder in source_folders:
         all_files.extend(scan_m4b_files(folder))
 
-    logger.info("Total .m4b files found: %d", len(all_files))
+    logger.info("Total audiobook files found: %d", len(all_files))
 
     async with get_db() as db:
         for file_path in all_files:
@@ -107,6 +107,7 @@ async def scan_folders(
                 folder_path=str(file_path.parent),
                 extension=file_path.suffix.lower(),
                 file_size=file_size_bytes(file_path),
+                audio_format=get_audio_format(file_path),
                 scan_status=ScanStatus.PENDING,
             )
 
@@ -114,8 +115,8 @@ async def scan_folders(
                 """
                 INSERT INTO local_audiobooks
                     (batch_run_id, source_path, filename, folder_path,
-                     extension, file_size, scan_status)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                     extension, file_size, audio_format, scan_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     audiobook.batch_run_id,
@@ -124,6 +125,7 @@ async def scan_folders(
                     audiobook.folder_path,
                     audiobook.extension,
                     audiobook.file_size,
+                    audiobook.audio_format,
                     audiobook.scan_status.value,
                 ),
             )

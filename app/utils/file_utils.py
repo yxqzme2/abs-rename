@@ -39,13 +39,29 @@ def file_size_bytes(path: str | Path) -> int:
 
 def scan_m4b_files(folder: str | Path) -> list[Path]:
     """
-    Recursively find all .m4b files under the given folder.
+    Recursively find all supported audiobook files (.m4b, .m4a, .mp3) under the given folder.
     Returns a sorted list of absolute Paths.
     """
     root = Path(folder)
     if not root.is_dir():
         logger.warning("Scan target is not a directory: %s", folder)
         return []
-    found = sorted(root.rglob("*.m4b"))
-    logger.info("Found %d .m4b file(s) under %s", len(found), folder)
+
+    found = []
+    for ext in ['*.m4b', '*.m4a', '*.mp3']:
+        found.extend(root.rglob(ext))
+
+    found = sorted(set(found))  # Remove duplicates and sort
+    logger.info("Found %d audiobook file(s) under %s", len(found), folder)
     return found
+
+
+def get_audio_format(file_path: str | Path) -> str:
+    """
+    Determine the audio format from file extension.
+    Returns: 'm4b', 'm4a', 'mp3', or 'unknown'
+    """
+    ext = Path(file_path).suffix.lower()
+    if ext in {'.m4b', '.m4a', '.mp3'}:
+        return ext.lstrip('.')
+    return 'unknown'

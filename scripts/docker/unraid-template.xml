@@ -86,4 +86,27 @@
     Required="false"
     Mask="false">400</Config>
 
+  <!-- MP3 hand-off folder -->
+  <Config
+    Name="MP3 Hand-off Folder"
+    Target="MP3_HANDOFF_FOLDER"
+    Default="/mnt/user/mp3-convert"
+    Mode="rw"
+    Description="Where MP3 files are moved (renamed) for external converter container to pick up. Leave blank to disable MP3 hand-off feature."
+    Type="Path"
+    Display="always"
+    Required="false"
+    Mask="false">/mnt/user/mp3-convert</Config>
+
+  <!-- MP3 matching toggle -->
+  <Config
+    Name="Match MP3 Files"
+    Target="MATCH_MP3_FILES"
+    Default="true"
+    Description="Whether to match MP3s via AudNexus and show in results (like M4B). If false, MP3s are not processed."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">true</Config>
+
 </Container>

@@ -13,6 +13,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
+from app.config import MP3_HANDOFF_FOLDER
 from app.db.queries.results import get_approved_plans
 from app.db.queries.batch_runs import get_batch_run
 from app.models.rename_plan import RenamePlan
@@ -23,13 +24,18 @@ router = APIRouter()
 
 
 @router.get("/copy/{batch_run_id}/stream")
-async def stream_copy(batch_run_id: int, overwrite: bool = False):
+async def stream_copy(
+    batch_run_id: int,
+    overwrite: bool = False,
+    delete_after: bool = False,
+):
     """
     SSE endpoint that streams copy progress for a batch run.
 
     Query params:
-        overwrite  — if true, existing destination files are overwritten;
-                     if false (default), conflicts are skipped and logged.
+        overwrite      — if true, existing destination files are overwritten;
+                         if false (default), conflicts are skipped and logged.
+        delete_after   — if true, delete source files after successful copy/move
     """
     run = await get_batch_run(batch_run_id)
     if not run:
@@ -56,7 +62,14 @@ async def stream_copy(batch_run_id: int, overwrite: bool = False):
     is_dry_run = bool(run["is_dry_run"])
 
     async def event_generator():
-        async for event in execute_copies(plans, batch_run_id, is_dry_run, overwrite=overwrite):
+        async for event in execute_copies(
+            plans,
+            batch_run_id,
+            is_dry_run,
+            overwrite=overwrite,
+            delete_after=delete_after,
+            mp3_handoff_folder=MP3_HANDOFF_FOLDER if MP3_HANDOFF_FOLDER else None,
+        ):
             yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(

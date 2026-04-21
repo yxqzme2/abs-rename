@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # -------------------------------------------------------
 # ABS Rename — Docker build script
-# Run from the project root: bash build.sh
+# Run from the project root: bash scripts/docker/build.sh
 # -------------------------------------------------------
 
 set -euo pipefail

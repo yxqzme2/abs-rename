@@ -25,7 +25,7 @@ class ScanStatus(str, Enum):
 
 
 class LocalAudiobook(BaseModel):
-    """File-level record created by the scanner for each .m4b found."""
+    """File-level record created by the scanner for each audiobook file found."""
     id:           int | None = None
     batch_run_id: int
     source_path:  str           # absolute path to the file
@@ -33,6 +33,7 @@ class LocalAudiobook(BaseModel):
     folder_path:  str           # parent directory
     extension:    str = ".m4b"
     file_size:    int = 0       # bytes
+    audio_format: str = "m4b"   # 'm4b', 'm4a', or 'mp3'
     scan_status:  ScanStatus = ScanStatus.PENDING
 
 

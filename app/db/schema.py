@@ -22,18 +22,22 @@ SCHEMA_STATEMENTS: list[str] = [
         template_used           TEXT,
         is_dry_run              INTEGER NOT NULL DEFAULT 1,  -- 0/1 bool
         total_scanned           INTEGER DEFAULT 0,
+        total_m4b_files         INTEGER DEFAULT 0,
+        total_mp3_files         INTEGER DEFAULT 0,
         total_matched           INTEGER DEFAULT 0,
         total_review_required   INTEGER DEFAULT 0,
         total_unmatched         INTEGER DEFAULT 0,
         total_planned           INTEGER DEFAULT 0,
         total_copied            INTEGER DEFAULT 0,
+        total_mp3_handed_off    INTEGER DEFAULT 0,
         total_skipped_conflicts INTEGER DEFAULT 0,
-        total_errors            INTEGER DEFAULT 0
+        total_errors            INTEGER DEFAULT 0,
+        total_deleted           INTEGER DEFAULT 0
     )
     """,
 
     # ------------------------------------------------------------------
-    # local_audiobooks — one record per .m4b file found by the scanner
+    # local_audiobooks — one record per audiobook file found by the scanner
     # ------------------------------------------------------------------
     """
     CREATE TABLE IF NOT EXISTS local_audiobooks (
@@ -44,6 +48,7 @@ SCHEMA_STATEMENTS: list[str] = [
         folder_path     TEXT NOT NULL,
         extension       TEXT NOT NULL DEFAULT '.m4b',
         file_size       INTEGER DEFAULT 0,
+        audio_format    TEXT NOT NULL DEFAULT 'm4b',
         scan_status     TEXT NOT NULL DEFAULT 'pending'
         -- scan_status values: pending | scanned | matched | unmatched
         --                     review_required | error
@@ -136,7 +141,7 @@ SCHEMA_STATEMENTS: list[str] = [
     """,
 
     # ------------------------------------------------------------------
-    # copy_operations — one row per file copy attempt
+    # copy_operations — one row per file copy/move attempt
     # ------------------------------------------------------------------
     """
     CREATE TABLE IF NOT EXISTS copy_operations (
@@ -144,8 +149,10 @@ SCHEMA_STATEMENTS: list[str] = [
         batch_run_id        INTEGER NOT NULL REFERENCES batch_runs(id),
         source_path         TEXT NOT NULL,
         destination_path    TEXT NOT NULL,
+        operation_type      TEXT NOT NULL DEFAULT 'copy',
+        -- operation_type values: copy (M4B/M4A) | move (MP3)
         status              TEXT NOT NULL DEFAULT 'pending',
-        -- status values: pending | success | skipped_conflict | error | dry_run
+        -- status values: pending | success | skipped_conflict | error | dry_run | deleted
         error_message       TEXT,
         timestamp           TEXT NOT NULL
     )

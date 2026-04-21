@@ -53,6 +53,10 @@ PORT: int = _get_int("PORT", 8000)
 # --- Logging ---
 DEBUG: bool = _get_bool("DEBUG", False)
 
+# --- MP3 Hand-off ---
+MP3_HANDOFF_FOLDER: str = _get("MP3_HANDOFF_FOLDER", "")
+MATCH_MP3_FILES: bool = _get_bool("MATCH_MP3_FILES", True)
+
 # --- Scoring weights (adjustable here without touching scorer logic) ---
 SCORE_WEIGHTS: dict[str, float] = {
     "title": 0.45,
