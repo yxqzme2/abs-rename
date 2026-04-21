@@ -120,11 +120,12 @@ async def execute_copies(
         # Determine operation type and actual destination
         if audio_format == "mp3" and mp3_handoff_folder:
             operation_type = OperationType.COPY
-            # For MP3: copy to hand-off folder with simple name (series_index)
+            # For MP3: copy to hand-off folder with simple name (series_index or source folder)
             actual_dest = _calculate_mp3_destination(
                 mp3_handoff_folder,
                 audiobook_info.get("series_from_tags"),
                 audiobook_info.get("series_index_from_tags"),
+                actual_source,  # fallback to source folder name
             )
         else:
             operation_type = OperationType.COPY
@@ -272,12 +273,15 @@ def _calculate_mp3_destination(
     mp3_handoff_folder: str,
     series_name: str | None,
     series_index: str | None,
+    source_path: str | None = None,
 ) -> Path:
     """
     Calculate the destination folder for MP3 hand-off using a simple flat structure.
-    Creates a folder named {series_name}_{series_index} under mp3_handoff_folder.
-    Example: Series: "Universe Series", Index: "08" -> /mp3-convert/Universe Series_08/
-    Falls back to "{series_name}" or "Unknown_Book" if index is missing.
+    Tries multiple fallbacks to create a unique folder name:
+    1. {series_name}_{series_index} if both available
+    2. {series_name} if only name available
+    3. Source folder name if metadata missing
+    4. "Unknown_Book" as last resort
     """
     folder_name = "Unknown_Book"
 
@@ -285,6 +289,9 @@ def _calculate_mp3_destination(
         folder_name = f"{series_name}_{series_index}"
     elif series_name:
         folder_name = series_name
+    elif source_path:
+        # Fall back to the source folder name for uniqueness
+        folder_name = Path(source_path).name
 
     return Path(mp3_handoff_folder) / folder_name
 
