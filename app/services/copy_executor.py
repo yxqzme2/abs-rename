@@ -354,31 +354,39 @@ async def _fix_destination_permissions(folders: set[Path]) -> None:
     This runs after all copies are complete.
     """
     if not folders:
+        logger.debug("No folders to fix permissions on")
         return
+
+    logger.info("Starting permission fixes on %d folder(s)", len(folders))
 
     try:
         def _chmod_recursive() -> None:
-            import os
-            import stat
+            import subprocess
             for target in folders:
                 if not target.exists():
+                    logger.warning("Target does not exist (skipping): %s", target)
                     continue
-                for root, dirs, files in os.walk(str(target)):
-                    for d in dirs:
-                        try:
-                            os.chmod(os.path.join(root, d), stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
-                        except OSError:
-                            pass
-                    for f in files:
-                        try:
-                            os.chmod(os.path.join(root, f), stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH)
-                        except OSError:
-                            pass
+
+                # Use chmod command for reliability
+                try:
+                    result = subprocess.run(
+                        ["chmod", "-R", "777", str(target)],
+                        capture_output=True,
+                        timeout=30,
+                    )
+                    if result.returncode != 0:
+                        logger.warning("chmod failed on %s: %s", target, result.stderr.decode())
+                    else:
+                        logger.info("chmod 777 succeeded on: %s", target)
+                except subprocess.TimeoutExpired:
+                    logger.error("chmod timeout on: %s", target)
+                except Exception as e:
+                    logger.error("chmod error on %s: %s", target, e)
 
         await asyncio.get_event_loop().run_in_executor(None, _chmod_recursive)
-        logger.info("Fixed permissions on %d destination folder(s)", len(folders))
+        logger.info("Completed permission fixes on %d folder(s)", len(folders))
     except Exception as exc:
-        logger.warning("Could not fix permissions: %s", exc)
+        logger.error("Permission fix failed: %s", exc)
 
 
 async def _persist_op(op: CopyOperation) -> None:
