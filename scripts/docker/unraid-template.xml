@@ -86,17 +86,28 @@
     Required="false"
     Mask="false">400</Config>
 
-  <!-- MP3 hand-off folder -->
+  <!-- MP3 hand-off folder (volume mount) -->
   <Config
-    Name="MP3 Hand-off Folder"
-    Target="MP3_HANDOFF_FOLDER"
+    Name="MP3 Hand-off Folder (Path)"
+    Target="/mp3-convert"
     Default="/mnt/user/mp3-convert"
     Mode="rw"
-    Description="Where MP3 files are moved (renamed) for external converter container to pick up. Leave blank to disable MP3 hand-off feature."
+    Description="Where MP3 files are moved (renamed) for external converter container to pick up."
     Type="Path"
     Display="always"
     Required="false"
     Mask="false">/mnt/user/mp3-convert</Config>
+
+  <!-- MP3 hand-off folder (environment variable) -->
+  <Config
+    Name="MP3 Hand-off Folder (Env)"
+    Target="MP3_HANDOFF_FOLDER"
+    Default="/mp3-convert"
+    Description="Container path for MP3 hand-off (must match the Path above). Leave blank to disable MP3 hand-off feature."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">/mp3-convert</Config>
 
   <!-- MP3 matching toggle -->
   <Config
